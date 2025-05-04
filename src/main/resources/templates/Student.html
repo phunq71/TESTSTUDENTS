@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Student Management</title>
+  <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"/>
+  <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+ <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>  
+  <style>
+    body {
+      background-color: #0A192F;
+      color: white;
+    }
+    .container { margin-top: 30px; }
+    .card {
+      background-color: black;
+      color: white;
+      border: none;
+      padding: 20px;
+      border-radius: 10px;
+    }
+    thead th {
+      background-color: green !important;
+      position: sticky;
+      top: 0;
+    }
+  </style>
+</head>
+<body>
+<div id="app" class="container">
+  <h2 class="text-center mb-3">STUDENT LIST</h2>
+  <div class="row">
+    <!-- Form -->
+    <div class="col-md-3">
+      <div class="card">
+        <form @submit.prevent="handleSubmit">
+          <div class="mb-3">
+            <label class="form-label">Email</label>
+            <input type="email" class="form-control" v-model="student.email" :disabled="editing" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Full Name</label>
+            <input type="text" class="form-control" v-model="student.fullname" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Marks</label>
+            <input type="number" class="form-control" v-model.number="student.marks" min="0" max="10" step="0.1" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Country</label>
+            <select class="form-control" v-model="student.country" required>
+              <option value="">Select a country</option>
+              <option>US</option>
+              <option>VN</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label>Gender</label><br/>
+            <input type="radio" v-model="student.gender" :value="true"> Male
+            <input type="radio" v-model="student.gender" :value="false"> Female
+          </div>
+          <button type="submit" class="btn btn-primary">{{ editing ? 'Update' : 'Create' }}</button>
+          <button type="button" class="btn btn-secondary ms-2" @click="reset">Reset</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="col-md-9">
+      <div class="card">
+        <div class="mb-3">
+          <input type="text" class="form-control" placeholder="Search by name..." v-model="searchQuery" @input="fetchStudents(0)">
+        </div>
+        <table class="table table-dark table-bordered table-hover">
+          <thead class="text-center">
+            <tr>
+              <th>Email</th>
+              <th>Full Name</th>
+              <th>Marks</th>
+              <th>Gender</th>
+              <th>Country</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="s in students" :key="s.email">
+              <td>{{ s.email }}</td>
+              <td>{{ s.fullname }}</td>
+              <td>{{ s.marks }}</td>
+              <td>{{ s.gender ? 'Male' : 'Female' }}</td>
+              <td>{{ s.country }}</td>
+              <td>
+                <button class="btn btn-warning me-1" @click="edit(s)">Edit</button>
+                <button class="btn btn-danger" @click="deleteStudent(s.email)">Delete</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <!-- Pagination -->
+        <nav>
+          <ul class="pagination justify-content-center">
+            <li class="page-item" :class="{ disabled: currentPage === 0 }">
+              <button class="page-link" @click="fetchStudents(currentPage - 1)">Previous</button>
+            </li>
+            <li class="page-item" v-for="page in (totalPages -1) " :class="{ active: page === currentPage }">
+              <button class="page-link" @click="fetchStudents(page)">{{ page + 1 }}</button>
+            </li>
+            <li class="page-item" :class="{ disabled: currentPage >= totalPages - 1 }">
+              <button class="page-link" @click="fetchStudents(currentPage + 1)">Next</button>
+            </li>
+          </ul>
+        </nav>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const { createApp } = Vue;
+createApp({
+  data() {
+    return {
+      students: [],
+      student: { email: '', fullname: '', marks: 0, country: '', gender: true },
+      editing: false,
+      searchQuery: '',
+      currentPage: 0,
+      totalPages: 1,
+      pageSize: 5
+    };
+  },
+  methods: {
+	  connectWebSocket() {
+		  const socket = new SockJS('/ws');
+		  this.stompClient = Stomp.over(socket);
+		  this.stompClient.connect({}, () => {
+		    this.stompClient.subscribe('/topic/students', () => {
+		      this.fetchStudents(this.currentPage); // reload danh sách khi có thay đổi
+		    });
+		  });
+		},
+    fetchStudents(page = 0) {
+      const params = {
+        keyword: this.searchQuery,
+        page: page,
+        size: this.pageSize
+      };
+      axios.get('/rest/students', { params }).then(res => {
+        this.students = res.data.content;
+        this.totalPages = res.data.totalPages;
+        this.currentPage = res.data.number;
+      });
+    },
+    handleSubmit() {
+      if (this.editing) {
+        axios.put('/rest/students', this.student).then(() => {
+          this.fetchStudents(this.currentPage);
+          this.reset();
+        });
+      } else {
+        axios.post('/rest/students', this.student).then(() => {
+          this.fetchStudents(0);
+          this.reset();
+        });
+      }
+    },
+    deleteStudent(email) {
+      axios.delete(`/rest/students/${email}`).then(() => {
+        this.fetchStudents(this.currentPage);
+      });
+    },
+    edit(s) {
+      this.student = { ...s };
+      this.editing = true;
+    },
+    reset() {
+      this.student = { email: '', fullname: '', marks: 0, country: '', gender: true };
+      this.editing = false;
+    }
+  },
+  mounted() {
+	  this.fetchStudents();
+	  this.connectWebSocket();
+	}
+}).mount('#app');
+</script>
+
+</body>
+</html>
